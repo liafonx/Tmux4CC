@@ -19,8 +19,8 @@ Scripts run locally on each machine — no remote sudo.
 ## Lint
 
 ```bash
-shellcheck install-tmux.sh setup-ntfy-server.sh
-bash -n install-tmux.sh && bash -n setup-ntfy-server.sh
+shellcheck hooks/notify.sh scripts/deploy.sh scripts/tmux-cleanup.sh scripts/install-tmux.sh scripts/setup-ntfy-server.sh
+bash -n <script>
 ```
 
 All `.sh` files must pass `shellcheck` and `bash -n`.
@@ -30,7 +30,16 @@ All `.sh` files must pass `shellcheck` and `bash -n`.
 - `*.sh` — executable scripts, run with `bash <script>.sh`
 - `*-agent.md` — agent instruction files for Claude Code (not runnable scripts). Paste into Claude Code to execute as an autonomous agent.
 - `must-user-actions.md` — human checklist for steps requiring manual interaction
-- `tmux.conf` — tmux configuration deployed to `~/.config/tmux/tmux.conf` on each machine
+
+## Repo structure
+
+```
+tmux/           — tmux config: tmux.conf (core), integrations.conf (Claude/Codex), status-bar.conf
+zsh/shared/     — shared zsh files sourced on all machines (zshenv, tmux4cc integration, aliases, completions)
+zsh/overlays/   — per-machine zsh additions: macbook.zsh, macmini.zsh, linux-vps.zsh
+hooks/          — Claude Code hook scripts (notify.sh)
+scripts/        — deploy.sh, tmux-cleanup.sh, archived installers
+```
 
 ## Setup status
 
@@ -87,7 +96,13 @@ Run `prefix + I` inside tmux to install all declared but missing plugins.
 
 All three machines are fully deployed. When editing any config file, **always deploy to both remotes and reload**. MacBook picks up `tmux.conf` changes via symlink automatically.
 
-Use `scripts/deploy.sh` for automated deployment. Manual SCP commands below for reference:
+Use `scripts/deploy.sh` for automated deployment. **Run from MacBook only** — deploys local symlinks then SCPs to both remotes.
+
+```bash
+bash scripts/deploy.sh [--all | --tmux | --zsh | --hooks | --cleanup] [--dry-run]
+```
+
+Manual SCP commands below for reference:
 
 **tmux.conf** — deploy and reload on both remotes:
 ```bash
@@ -102,6 +117,14 @@ scp tmux/tmux.conf liafonx@88.151.34.29:~/.config/tmux/tmux.conf && \
 |-----------|---------------|
 | `hooks/notify.sh` | `~/.claude/hooks/notify.sh` |
 | `scripts/tmux-cleanup.sh` | `~/.tmux/cleanup.sh` |
+
+## Gotchas
+
+- **`scp -r` trailing slash**: Never `scp -r src/ dst/` — copies the dir itself into dst, creating `dst/src/` nested dirs. Use `scp -r src dst/parent/` instead.
+- **Mac Mini `~/.secrets`**: That path is a certbot directory. Credentials live in `~/.zsh_secrets` on **all** machines.
+- **Credentials file**: `~/.zsh_secrets` (chmod 600) on all machines, sourced by `zsh/shared/zshenv.zsh`.
+- **tmux config test**: OMZ wraps the `tmux` binary in interactive zsh. For reload testing inside an existing session use: `TMUX="" /opt/homebrew/bin/tmux source-file ~/.config/tmux/tmux.conf`
+- **`~/.config/tmux4cc`**: MacBook = symlink to repo root. Remotes = real directory. `tmux/tmux.conf` source-files reference this path — must exist before config reload works.
 
 ## Conventions
 
