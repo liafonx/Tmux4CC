@@ -8,5 +8,5 @@ export LC_ALL=en_US.UTF-8
 typeset -U path PATH
 
 # Secrets: machine-local credentials, not in git.
-# Template: zsh/secrets.example → copy to ~/.secrets, chmod 600.
-[[ -f ~/.secrets ]] && source ~/.secrets
+# Template: zsh/secrets.example → copy to ~/.zsh_secrets, chmod 600.
+[[ -f ~/.zsh_secrets ]] && source ~/.zsh_secrets

@@ -7,5 +7,4 @@ claude.json
 *.bak
 
 # Machine-local credentials — never commit
-.secrets
-*.secrets
+.zsh_secrets
