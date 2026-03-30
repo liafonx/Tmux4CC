@@ -1,0 +1,7 @@
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/
+docs/
+claude.json
+.DS_Store
+*.bak
