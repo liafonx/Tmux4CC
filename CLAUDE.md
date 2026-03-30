@@ -42,11 +42,11 @@ All `.sh` files must pass `shellcheck` and `bash -n`.
 
 **All three machines are fully set up.** Do not re-run `install-tmux.sh`, `zsh-preflight-agent.md`, or `setup-ntfy-server.sh`. For any further changes, edit config files directly (locally or via SSH) and SCP/reload as needed.
 
-## notify.sh
+## hooks/notify.sh
 
 Claude Code hook script for ntfy notifications. On the MacBook (liafo), this file is a symlink to the repo:
 ```
-~/.claude/hooks/notify.sh -> ~/Development/GitWorkspace/Tmux4CC/notify.sh
+~/.claude/hooks/notify.sh -> ~/Development/GitWorkspace/Tmux4CC/hooks/notify.sh
 ```
 Edits to the repo file take effect immediately. On Mac Mini and Linux VPS, deploy via SCP — the hook path in `~/.claude/hooks/notify.sh` must point to wherever the file lands.
 
@@ -54,7 +54,7 @@ Edits to the repo file take effect immediately. On Mac Mini and Linux VPS, deplo
 
 Deployed to `~/.config/tmux/tmux.conf`. On the MacBook (liafo), this file is a symlink to the repo:
 ```
-~/.config/tmux/tmux.conf -> ~/Development/GitWorkspace/Tmux4CC/tmux.conf
+~/.config/tmux/tmux.conf -> ~/Development/GitWorkspace/Tmux4CC/tmux/tmux.conf
 ```
 Edits to the repo file take effect immediately on this machine. On Mac Mini and Linux VPS, deploy via SCP and reload manually.
 
@@ -80,7 +80,6 @@ tmux source ~/.config/tmux/tmux.conf
 | `tmux-thumbs` | yes | Hint-based copy for visible text patterns | `prefix + Space` |
 | `tmux-fuzzback` | yes | Fuzzy search scrollback buffer (requires `fzf`) | `prefix + ?` |
 | `tmux-yank` | yes | Clipboard integration for copy-mode and mouse | `y` in copy mode |
-| `tmux-sessionx` | yes | Fuzzy session manager with preview and tree mode | `Option + s` |
 
 Run `prefix + I` inside tmux to install all declared but missing plugins.
 
@@ -88,19 +87,21 @@ Run `prefix + I` inside tmux to install all declared but missing plugins.
 
 All three machines are fully deployed. When editing any config file, **always deploy to both remotes and reload**. MacBook picks up `tmux.conf` changes via symlink automatically.
 
+Use `scripts/deploy.sh` for automated deployment. Manual SCP commands below for reference:
+
 **tmux.conf** — deploy and reload on both remotes:
 ```bash
-scp tmux.conf liafonx@Liafonxs-Mac-mini.local:~/.config/tmux/tmux.conf && \
+scp tmux/tmux.conf liafonx@Liafonxs-Mac-mini.local:~/.config/tmux/tmux.conf && \
   ssh liafonx@Liafonxs-Mac-mini.local -- 'SKIP_TMUX=1 /bin/bash --norc -c "/usr/local/bin/tmux source ~/.config/tmux/tmux.conf"'
-scp tmux.conf liafonx@88.151.34.29:~/.config/tmux/tmux.conf && \
+scp tmux/tmux.conf liafonx@88.151.34.29:~/.config/tmux/tmux.conf && \
   ssh liafonx@88.151.34.29 'SKIP_TMUX=1 tmux source ~/.config/tmux/tmux.conf'
 ```
 
 **Other files** — SCP to deployed paths on both remotes:
 | Repo file | Deployed path |
 |-----------|---------------|
-| `notify.sh` | `~/.claude/hooks/notify.sh` |
-| `tmux-cleanup.sh` | `~/.tmux/cleanup.sh` |
+| `hooks/notify.sh` | `~/.claude/hooks/notify.sh` |
+| `scripts/tmux-cleanup.sh` | `~/.tmux/cleanup.sh` |
 
 ## Conventions
 

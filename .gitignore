@@ -5,3 +5,7 @@ docs/
 claude.json
 .DS_Store
 *.bak
+
+# Machine-local credentials — never commit
+.secrets
+*.secrets
