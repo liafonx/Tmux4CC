@@ -146,12 +146,13 @@ deploy_remote() {
 
   echo "  Deploying to $host..."
 
-  # Create directory structure on remote
-  run_ssh "$host" 'mkdir -p ~/.config/tmux4cc/tmux ~/.config/tmux4cc/zsh/shared ~/.config/tmux4cc/zsh ~/.config/tmux4cc/hooks ~/.config/tmux4cc/scripts ~/.config/tmux ~/.claude/hooks ~/.tmux'
+  # Create directory structure on remote (parent dirs; scp creates leaf dirs)
+  run_ssh "$host" 'mkdir -p ~/.config/tmux4cc ~/.config/tmux4cc/zsh ~/.config/tmux4cc/hooks ~/.config/tmux4cc/scripts ~/.config/tmux ~/.claude/hooks ~/.tmux'
 
   if [[ "$DO_TMUX" -eq 1 ]]; then
     echo "  [tmux] copying tmux/ to remote..."
-    run_scp "${REPO_DIR}/tmux/" "${host}:~/.config/tmux4cc/tmux/"
+    # No trailing slash on source: scp copies the dir itself into destination
+    run_scp "${REPO_DIR}/tmux" "${host}:~/.config/tmux4cc/"
     run_ssh "$host" 'ln -sfn ~/.config/tmux4cc/tmux/tmux.conf ~/.config/tmux/tmux.conf'
     # Reload tmux on remote if a session exists
     run_ssh "$host" 'SKIP_TMUX=1 tmux source ~/.config/tmux/tmux.conf 2>/dev/null || true'
@@ -160,7 +161,8 @@ deploy_remote() {
 
   if [[ "$DO_ZSH" -eq 1 ]]; then
     echo "  [zsh] copying zsh/shared/ and overlay to remote..."
-    run_scp "${REPO_DIR}/zsh/shared/" "${host}:~/.config/tmux4cc/zsh/shared/"
+    # No trailing slash on source: scp copies the dir itself into parent
+    run_scp "${REPO_DIR}/zsh/shared" "${host}:~/.config/tmux4cc/zsh/"
     if [[ -f "${REPO_DIR}/${overlay_src}" ]]; then
       run_scp "${REPO_DIR}/${overlay_src}" "${host}:~/.config/tmux4cc/zsh/overlay.zsh"
     else
