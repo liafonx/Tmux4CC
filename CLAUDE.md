@@ -19,7 +19,7 @@ Scripts run locally on each machine — no remote sudo.
 ## Lint
 
 ```bash
-shellcheck hooks/notify.sh scripts/deploy.sh scripts/tmux-cleanup.sh scripts/install-tmux.sh scripts/setup-ntfy-server.sh
+shellcheck hooks/notify.sh scripts/install-claude-hooks.sh scripts/deploy.sh scripts/tmux-cleanup.sh scripts/install-tmux.sh scripts/setup-ntfy-server.sh
 bash -n <script>
 ```
 
@@ -37,8 +37,9 @@ All `.sh` files must pass `shellcheck` and `bash -n`.
 tmux/           — tmux config: tmux.conf (core), integrations.conf (Claude/Codex), status-bar.conf
 zsh/shared/     — shared zsh files sourced on all machines (zshenv, tmux4cc integration, aliases, completions)
 zsh/overlays/   — per-machine zsh additions: macbook.zsh, macmini.zsh, linux-vps.zsh
-hooks/          — Claude Code hook scripts (notify.sh)
-scripts/        — deploy.sh, tmux-cleanup.sh, archived installers
+hooks/          — Claude Code hooks: notify.sh (Bark push) + claude-hooks.json (settings.json fragment)
+scripts/        — deploy.sh, install-claude-hooks.sh, tmux-cleanup.sh, archived installers
+server/bark/    — self-hosted bark-server on the VPS: compose.yml + Caddy site
 ```
 
 ## Setup status
@@ -51,13 +52,24 @@ scripts/        — deploy.sh, tmux-cleanup.sh, archived installers
 
 **All three machines are fully set up.** Do not re-run `install-tmux.sh`, `zsh-preflight-agent.md`, or `setup-ntfy-server.sh`. For any further changes, edit config files directly (locally or via SSH) and SCP/reload as needed.
 
-## hooks/notify.sh
+## hooks/notify.sh (Bark push)
 
-Claude Code hook script for ntfy notifications. On the MacBook (liafo), this file is a symlink to the repo:
-```
-~/.claude/hooks/notify.sh -> ~/Development/GitWorkspace/Tmux4CC/hooks/notify.sh
-```
-Edits to the repo file take effect immediately. On Mac Mini and Linux VPS, deploy via SCP — the hook path in `~/.claude/hooks/notify.sh` must point to wherever the file lands.
+Claude Code hook → [Bark](https://github.com/Finb/bark) iOS push via the self-hosted server `https://bark.liafonx.net`. Works in the CLI and the Desktop app's Code tab (both read `~/.claude/settings.json` hooks).
+
+**What pushes** — main agent only; any hook input with `.agent_id` (subagent) is dropped:
+- `PreToolUse` `AskUserQuestion` → ❓ question + options
+- `PreToolUse` `ExitPlanMode` → 📋 plan summary
+- `Stop` → ✅ finished, **only if no more work is coming**: `background_tasks` and `session_crons` (incl. `/loop` wakeups) in the Stop input are both empty, and `stop_hook_active` isn't true.
+
+Nothing else is registered (no `SubagentStop`/`Notification`/`PermissionRequest`). Hooks run with `async: true`. One push `id` per session, so a session's newest push replaces its previous one.
+
+**Install** — `scripts/install-claude-hooks.sh` (local, idempotent): symlinks `~/.claude/hooks/notify.sh` → `<repo>/hooks/notify.sh` and merges `hooks/claude-hooks.json` into `~/.claude/settings.json` (replaces entries whose command contains `/.claude/hooks/notify.sh`, keeps everything else; `--uninstall`, `--dry-run`). `deploy.sh --hooks` runs it locally and on both remotes.
+
+**Config** — `BARK_SERVER`, `BARK_DEVICE_KEY` (comma-separated for several devices), optional `BARK_HOST_LABEL` in `~/.zsh_secrets`. The script greps only `BARK_*` lines from that file, because Desktop-app sessions don't inherit the shell env. Debug: `BARK_DRY_RUN=1` prints the payload, `BARK_DEBUG=1` logs raw hook input to `$TMPDIR/cc-bark-debug.jsonl`. Smoke test: `bash ~/.claude/hooks/notify.sh --test`.
+
+**New machine** — copy the repo, add the `BARK_*` lines to `~/.zsh_secrets`, run `bash scripts/install-claude-hooks.sh`, then `notify.sh --test`.
+
+**Server** — `server/bark/compose.yml` runs at `~/bark-server` on the VPS (`docker compose up -d`, port `127.0.0.1:8087`); `server/bark/bark.liafonx.net.caddy` goes in `/etc/caddy/sites-available/` (wildcard cert, needs sudo). The old ntfy setup is retired (Caddy site `.disabled`).
 
 ## tmux.conf
 
@@ -115,8 +127,9 @@ scp tmux/tmux.conf liafonx@88.151.34.29:~/.config/tmux/tmux.conf && \
 **Other files** — SCP to deployed paths on both remotes:
 | Repo file | Deployed path |
 |-----------|---------------|
-| `hooks/notify.sh` | `~/.claude/hooks/notify.sh` |
+| `hooks/` | `~/.config/tmux4cc/hooks/` → then run `scripts/install-claude-hooks.sh` there (links `~/.claude/hooks/notify.sh`, merges settings.json) |
 | `scripts/tmux-cleanup.sh` | `~/.tmux/cleanup.sh` |
+| `server/bark/*` | VPS only: `~/bark-server/` |
 
 ## Gotchas
 

@@ -1,0 +1,20 @@
+# bark-server — self-hosted Bark push relay (https://github.com/Finb/bark-server)
+# Runs on the Linux VPS. Deploy path: ~/bark-server/compose.yml
+# Public URL: https://bark.liafonx.net (Caddy → 127.0.0.1:8087, see bark.liafonx.net.caddy)
+#
+#   docker compose up -d            # start / apply changes
+#   docker compose pull && docker compose up -d   # after bumping the image tag
+
+services:
+  bark-server:
+    image: finab/bark-server:v2.3.7
+    container_name: bark-server
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8087:8080"
+    environment:
+      # Log the real client IP that Caddy forwards.
+      BARK_SERVER_PROXY_HEADER: X-Forwarded-For
+    volumes:
+      # Device registrations (bbolt db) — keep across upgrades.
+      - ./data:/data

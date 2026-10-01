@@ -33,15 +33,15 @@ scp tmux.conf liafonx@88.151.34.29:~/.config/tmux/tmux.conf && \
   ssh liafonx@88.151.34.29 'SKIP_TMUX=1 tmux source ~/.config/tmux/tmux.conf'
 ```
 
-**notify.sh** — deploy to both remotes:
+**Claude Code hooks (Bark push)** — symlink + settings.json merge locally, then SCP + install on both remotes:
 ```bash
-scp notify.sh liafonx@Liafonxs-Mac-mini.local:~/.claude/hooks/notify.sh
-scp notify.sh liafonx@88.151.34.29:~/.claude/hooks/notify.sh
+bash scripts/deploy.sh --hooks
 ```
+New machine: copy the repo, add `BARK_SERVER` / `BARK_DEVICE_KEY` to `~/.zsh_secrets`, then run `bash scripts/install-claude-hooks.sh` and `bash hooks/notify.sh --test`.
 
 ## Lint
 
 ```bash
-shellcheck install-tmux.sh setup-ntfy-server.sh notify.sh tmux-cleanup.sh
-bash -n install-tmux.sh && bash -n setup-ntfy-server.sh
+shellcheck hooks/notify.sh scripts/install-claude-hooks.sh scripts/deploy.sh scripts/tmux-cleanup.sh
+bash -n hooks/notify.sh && bash -n scripts/install-claude-hooks.sh
 ```

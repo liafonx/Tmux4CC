@@ -122,9 +122,8 @@ deploy_macbook() {
   fi
 
   if [[ "$DO_HOOKS" -eq 1 ]]; then
-    echo "  [hooks] symlinking notify.sh..."
-    run mkdir -p "$HOME/.claude/hooks"
-    run ln -sfn "${REPO_DIR}/hooks/notify.sh" "$HOME/.claude/hooks/notify.sh"
+    echo "  [hooks] installing Claude Code hooks (notify.sh symlink + settings.json)..."
+    run bash "${REPO_DIR}/scripts/install-claude-hooks.sh"
     echo "  [hooks] done"
   fi
 
@@ -172,9 +171,11 @@ deploy_remote() {
   fi
 
   if [[ "$DO_HOOKS" -eq 1 ]]; then
-    echo "  [hooks] copying notify.sh to remote..."
-    run_scp "${REPO_DIR}/hooks/notify.sh" "${host}:~/.config/tmux4cc/hooks/notify.sh"
-    run_ssh "$host" 'chmod +x ~/.config/tmux4cc/hooks/notify.sh && ln -sfn ~/.config/tmux4cc/hooks/notify.sh ~/.claude/hooks/notify.sh'
+    echo "  [hooks] copying hooks/ and installer to remote..."
+    # No trailing slash on source: scp copies the dir itself into parent
+    run_scp "${REPO_DIR}/hooks" "${host}:~/.config/tmux4cc/"
+    run_scp "${REPO_DIR}/scripts/install-claude-hooks.sh" "${host}:~/.config/tmux4cc/scripts/install-claude-hooks.sh"
+    run_ssh "$host" 'bash ~/.config/tmux4cc/scripts/install-claude-hooks.sh'
     echo "  [hooks] done"
   fi
 
