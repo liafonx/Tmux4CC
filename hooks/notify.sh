@@ -12,8 +12,9 @@ trap 'exit 0' ERR
 #                                no background tasks and no session crons (/loop wakeups)
 # Everything else (SubagentStop, Notification, ...) is ignored.
 #
-# Push layout: title "Claude Code · <host>", subtitle "<session name>",
-# body "<emoji> <State>" + newline + plain-text details (≤ 3000 bytes).
+# Push layout (kept short — it's a nudge to go back to the computer):
+#   title "Claude Code · <host>", subtitle "<session name>",
+#   body  "<emoji> <State>" + one line of context (≤ ~120 columns ≈ 3 phone lines).
 #
 # Config — environment, else the BARK_* lines of ~/.zsh_secrets
 # (Desktop app sessions don't inherit the shell environment):
@@ -65,55 +66,69 @@ if [[ -n "$cwd" ]]; then
 fi
 
 # Decide whether to push and build the message; prints nothing to skip.
-# Body = "<emoji> <State>" line, then the content as plain text: Bark doesn't render
-# markdown, so markers are stripped; blank lines are dropped so the ~4-line iOS
-# preview isn't wasted, but list items / options keep their own lines.
+# The push is a nudge to go back to the computer, not a reading view: body =
+# "<emoji> <State>" line + one short plain-text line (Bark doesn't render markdown).
 note=$(jq -c \
   --arg host "$host" \
   --arg sound_ask "${BARK_SOUND_ASK:-minuet}" \
   --arg sound_done "${BARK_SOUND_DONE:-}" '
-  def md_line:
-    if test("^\\s*\\|?[\\s:|-]*-[\\s:|-]*\\|?\\s*$") then ""          # table separator / rule
-    else
-      sub("^\\s*#+\\s*"; "")                                            # heading
-      | sub("^\\s*>\\s?"; "")                                           # blockquote
-      | sub("^(?<i>\\s*)[-*+]\\s+"; "\(.i)• ")                          # bullet
-      | gsub("\\[(?<t>[^\\]]+)\\]\\([^)]*\\)"; "\(.t)")                 # [text](url) → text
-      | gsub("\\*\\*|~~|`"; "")                                       # bold, strike, code
-      | gsub("\\*(?<t>[^*\\s][^*]*)\\*"; "\(.t)")                       # *italic*
-      | if test("^\\s*\\|") then                                        # table row
-          gsub("^\\s*\\|\\s*|\\s*\\|\\s*$"; "") | gsub("\\s*\\|\\s*"; " · ")
-        else . end
-    end;
-  def plain:
+  # Markdown text → its prose lines (fenced code, table separators and rules dropped).
+  def prose_lines:
     gsub("\r"; "") | split("\n")
     | reduce .[] as $l ({out: [], code: false};
-        if ($l | test("^\\s*(```|~~~)")) then .code |= not             # fence line itself dropped
-        elif .code then .out += [$l]                                    # code kept verbatim
-        else .out += [$l | md_line] end)
-    | .out | map(sub("\\s+$"; "")) | map(select(length > 0)) | join("\n");
+        if ($l | test("^\\s*(```|~~~)")) then .code |= not
+        elif .code then .
+        else .out += [$l] end)
+    | .out | map(select(test("\\S") and (test("^\\s*\\|?[\\s:|-]*-[\\s:|-]*\\|?\\s*$") | not)));
+  def inline:
+    sub("^\\s*#+\\s*"; "")                                              # heading
+    | sub("^\\s*>\\s?"; "")                                             # blockquote
+    | sub("^\\s*([-*+]|\\d+[.)])\\s+"; "")                              # list marker
+    | gsub("\\[(?<t>[^\\]]+)\\]\\([^)]*\\)"; "\(.t)")                   # [text](url) → text
+    | gsub("\\*\\*|~~|`"; "")                                         # bold, strike, code
+    | gsub("\\*(?<t>[^*\\s][^*]*)\\*"; "\(.t)")                         # *italic*
+    | gsub("\\s*\\|\\s*"; " ") | gsub("^\\s+|\\s+$"; "");               # table cells, trim
+  # Join lines into one; " · " where a line has no closing punctuation (e.g. list items).
+  def join_lines:
+    reduce .[] as $l (""; if . == "" then $l
+                          elif test("[.:;!?。：；！？…]$") then . + " " + $l
+                          else . + " · " + $l end);
+  # One line, at most $n display columns (CJK/emoji count 2), cut at a word boundary.
+  # ~120 columns ≈ 3 lines on an iPhone, so state line + this fits the 4-line preview.
+  def brief($n):
+    gsub("\\s+"; " ") as $s
+    | (reduce ($s | explode)[] as $c ({w: 0, out: [], cut: false};
+         if .cut then .
+         else (.w + (if $c >= 11904 then 2 else 1 end)) as $w
+              | if $w > $n then .cut = true else .w = $w | .out += [$c] end
+         end)) as $r
+    | if $r.cut then ($r.out | implode | sub("\\s+[!-~]{1,20}$"; "")) + "…" else $s end;  # drop a cut ASCII word
+  # Opening prose of a message, headings skipped.
+  def gist($n): [prose_lines[] | select(test("^\\s*#") | not) | inline] | join_lines | brief($n);
 
   if (.agent_id // "") != "" then empty
 
   elif .hook_event_name == "Test" then
-    {body: "🔔 Test\nBark notifications for Claude Code work on \($host).", level: "active", sound: ""}
+    {body: "🔔 Test\nBark works on \($host).", level: "active", sound: ""}
 
   elif .hook_event_name == "PreToolUse" and .tool_name == "AskUserQuestion" then
     (.tool_input.questions // []) as $qs
-    | {body: ("❓ Question\n"
-              + (if ($qs | length) == 0 then "Claude has a question for you."
-                 else [$qs | to_entries[]
-                        | (if ($qs | length) > 1 then "\(.key + 1). " else "" end)
-                          + (.value.question // "" | plain)
-                          + ([.value.options[]? | "\n• " + (.label // tostring)] | join(""))]
-                      | join("\n")
+    | {body: ("❓ Question"
+              + (if ($qs | length) == 0 then ""
+                 else "\n" + (($qs[0].question // "" | inline)
+                   + ([$qs[0].options[]? | .label // tostring] as $o
+                      | if ($o | length) > 0 then " (" + ($o | join(" / ")) + ")" else "" end)
+                   + (if ($qs | length) > 1 then " +\(($qs | length) - 1) more" else "" end)
+                   | brief(120))
                  end)),
        level: "timeSensitive", sound: $sound_ask}
 
   elif .hook_event_name == "PreToolUse" and .tool_name == "ExitPlanMode" then
-    {body: ("📋 Plan ready\n"
-            + (.tool_input.plan // "" | plain | if . == "" then "Claude has a plan for your review." else . end)),
-     level: "timeSensitive", sound: $sound_ask}
+    # Plan title = its first heading, else its opening line.
+    ((.tool_input.plan // "") | ([prose_lines[] | select(test("^\\s*#"))][0] // prose_lines[0] // "")
+     | inline | brief(90)) as $title
+    | {body: ("📋 Plan ready" + (if $title != "" then "\n" + $title else "" end)),
+       level: "timeSensitive", sound: $sound_ask}
 
   elif .hook_event_name == "Stop" then
     if .stop_hook_active == true
@@ -121,9 +136,9 @@ note=$(jq -c \
        or ((.session_crons // []) | length) > 0
     then empty
     else
-      {body: ("✅ Finished\n"
-              + (.last_assistant_message // "" | plain | if . == "" then "Claude is done." else . end)),
-       level: "active", sound: $sound_done}
+      (.last_assistant_message // "" | gist(120)) as $gist
+      | {body: ("✅ Finished" + (if $gist != "" then "\n" + $gist else "" end)),
+         level: "active", sound: $sound_done}
     end
 
   else empty end
@@ -154,13 +169,9 @@ payload=$(jq -c -n \
   --arg id "cc-${session:0:12}" \
   --arg icon "${BARK_ICON:-}" '
   def clip($n): if length > $n then .[0:$n] + "…" else . end;
-  # APNs caps the whole push at 4 KB, so cap the body in bytes (UTF-8), not characters.
-  def clip_bytes($max):
-    if utf8bytelength <= $max then .
-    else until(utf8bytelength <= $max - 3; .[0:(length * 0.95 | floor)]) + "…" end;
   ($keys | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))) as $k
   | {title: "Claude Code · \($host)", subtitle: ($session_name | clip(60)),
-     body: ($n.body | clip_bytes(3000)),
+     body: $n.body,
      level: $n.level, group: $project, id: $id, isArchive: "1"}
   + (if $n.sound != "" then {sound: $n.sound} else {} end)
   + (if $icon != "" then {icon: $icon} else {} end)
