@@ -12,9 +12,8 @@ trap 'exit 0' ERR
 #                                no background tasks and no session crons (/loop wakeups)
 # Everything else (SubagentStop, Notification, ...) is ignored.
 #
-# Push layout (kept short — it's a nudge to go back to the computer):
-#   title "Claude Code · <host>", subtitle "<session name>",
-#   body  "<emoji> <State>" + one line of context (≤ ~120 columns ≈ 3 phone lines).
+# Push layout — a nudge to go back to the computer, not a reading view:
+#   title "Claude Code · <host>", subtitle "<session name>", body "<emoji> <State>" only.
 #
 # Config — environment, else the BARK_* lines of ~/.zsh_secrets
 # (Desktop app sessions don't inherit the shell environment):
@@ -65,81 +64,28 @@ if [[ -n "$cwd" ]]; then
   fi
 fi
 
-# Decide whether to push and build the message; prints nothing to skip.
-# The push is a nudge to go back to the computer, not a reading view: body =
-# "<emoji> <State>" line + one short plain-text line (Bark doesn't render markdown).
+# Decide whether to push; prints nothing to skip. The body is just the status:
+# a push is a nudge to go back to the computer, not a reading view.
 note=$(jq -c \
-  --arg host "$host" \
   --arg sound_ask "${BARK_SOUND_ASK:-minuet}" \
   --arg sound_done "${BARK_SOUND_DONE:-}" '
-  # Markdown text → its prose lines (fenced code, table separators and rules dropped).
-  def prose_lines:
-    gsub("\r"; "") | split("\n")
-    | reduce .[] as $l ({out: [], code: false};
-        if ($l | test("^\\s*(```|~~~)")) then .code |= not
-        elif .code then .
-        else .out += [$l] end)
-    | .out | map(select(test("\\S") and (test("^\\s*\\|?[\\s:|-]*-[\\s:|-]*\\|?\\s*$") | not)));
-  def inline:
-    sub("^\\s*#+\\s*"; "")                                              # heading
-    | sub("^\\s*>\\s?"; "")                                             # blockquote
-    | sub("^\\s*([-*+]|\\d+[.)])\\s+"; "")                              # list marker
-    | gsub("\\[(?<t>[^\\]]+)\\]\\([^)]*\\)"; "\(.t)")                   # [text](url) → text
-    | gsub("\\*\\*|~~|`"; "")                                         # bold, strike, code
-    | gsub("\\*(?<t>[^*\\s][^*]*)\\*"; "\(.t)")                         # *italic*
-    | gsub("\\s*\\|\\s*"; " ") | gsub("^\\s+|\\s+$"; "");               # table cells, trim
-  # Join lines into one; " · " where a line has no closing punctuation (e.g. list items).
-  def join_lines:
-    reduce .[] as $l (""; if . == "" then $l
-                          elif test("[.:;!?。：；！？…]$") then . + " " + $l
-                          else . + " · " + $l end);
-  # One line, at most $n display columns (CJK/emoji count 2), cut at a word boundary.
-  # ~120 columns ≈ 3 lines on an iPhone, so state line + this fits the 4-line preview.
-  def brief($n):
-    gsub("\\s+"; " ") as $s
-    | (reduce ($s | explode)[] as $c ({w: 0, out: [], cut: false};
-         if .cut then .
-         else (.w + (if $c >= 11904 then 2 else 1 end)) as $w
-              | if $w > $n then .cut = true else .w = $w | .out += [$c] end
-         end)) as $r
-    | if $r.cut then ($r.out | implode | sub("\\s+[!-~]{1,20}$"; "")) + "…" else $s end;  # drop a cut ASCII word
-  # Opening prose of a message, headings skipped.
-  def gist($n): [prose_lines[] | select(test("^\\s*#") | not) | inline] | join_lines | brief($n);
-
   if (.agent_id // "") != "" then empty
 
   elif .hook_event_name == "Test" then
-    {body: "🔔 Test\nBark works on \($host).", level: "active", sound: ""}
+    {body: "🔔 Test", level: "active", sound: ""}
 
   elif .hook_event_name == "PreToolUse" and .tool_name == "AskUserQuestion" then
-    (.tool_input.questions // []) as $qs
-    | {body: ("❓ Question"
-              + (if ($qs | length) == 0 then ""
-                 else "\n" + (($qs[0].question // "" | inline)
-                   + ([$qs[0].options[]? | .label // tostring] as $o
-                      | if ($o | length) > 0 then " (" + ($o | join(" / ")) + ")" else "" end)
-                   + (if ($qs | length) > 1 then " +\(($qs | length) - 1) more" else "" end)
-                   | brief(120))
-                 end)),
-       level: "timeSensitive", sound: $sound_ask}
+    {body: "❓ Question", level: "timeSensitive", sound: $sound_ask}
 
   elif .hook_event_name == "PreToolUse" and .tool_name == "ExitPlanMode" then
-    # Plan title = its first heading, else its opening line.
-    ((.tool_input.plan // "") | ([prose_lines[] | select(test("^\\s*#"))][0] // prose_lines[0] // "")
-     | inline | brief(90)) as $title
-    | {body: ("📋 Plan ready" + (if $title != "" then "\n" + $title else "" end)),
-       level: "timeSensitive", sound: $sound_ask}
+    {body: "📋 Plan ready", level: "timeSensitive", sound: $sound_ask}
 
   elif .hook_event_name == "Stop" then
     if .stop_hook_active == true
        or ((.background_tasks // []) | length) > 0
        or ((.session_crons // []) | length) > 0
     then empty
-    else
-      (.last_assistant_message // "" | gist(120)) as $gist
-      | {body: ("✅ Finished" + (if $gist != "" then "\n" + $gist else "" end)),
-         level: "active", sound: $sound_done}
-    end
+    else {body: "✅ Finished", level: "active", sound: $sound_done} end
 
   else empty end
 ' <<<"$input")

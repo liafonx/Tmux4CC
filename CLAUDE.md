@@ -57,11 +57,11 @@ server/bark/    — self-hosted bark-server on the VPS: compose.yml + Caddy site
 Claude Code hook → [Bark](https://github.com/Finb/bark) iOS push via the self-hosted server `https://bark.liafonx.net`. Works in the CLI and the Desktop app's Code tab (both read `~/.claude/settings.json` hooks).
 
 **What pushes** — main agent only; any hook input with `.agent_id` (subagent) is dropped:
-- `PreToolUse` `AskUserQuestion` → ❓ question + options
-- `PreToolUse` `ExitPlanMode` → 📋 plan title
-- `Stop` → ✅ finished, **only if no more work is coming**: `background_tasks` and `session_crons` (incl. `/loop` wakeups) in the Stop input are both empty, and `stop_hook_active` isn't true.
+- `PreToolUse` `AskUserQuestion` → ❓ Question
+- `PreToolUse` `ExitPlanMode` → 📋 Plan ready
+- `Stop` → ✅ Finished, **only if no more work is coming**: `background_tasks` and `session_crons` (incl. `/loop` wakeups) in the Stop input are both empty, and `stop_hook_active` isn't true.
 
-**Layout** — title `Claude Code · <host>`, subtitle = session name (transcript `custom-title`, else project), body = `<emoji> <State>` + one plain-text line of ≤ ~120 display columns (CJK counts 2), so it fits the 4-line iOS preview. Keep it short: a push is a nudge to go back to the computer, not a reading view. Bark doesn't render markdown, so it's stripped.
+**Layout** — title `Claude Code · <host>`, subtitle = session name (transcript `custom-title`, else project), body = the status only (`✅ Finished`, `❓ Question`, `📋 Plan ready`). A push is a nudge to go back to the computer, not a reading view — don't add message text (it gets cut off in the iOS preview, and Bark doesn't render markdown).
 
 Nothing else is registered (no `SubagentStop`/`Notification`/`PermissionRequest`). Hooks run with `async: true`. One push `id` per session, so a session's newest push replaces its previous one.
 
