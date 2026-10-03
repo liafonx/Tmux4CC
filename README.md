@@ -37,7 +37,7 @@ scp tmux.conf liafonx@88.151.34.29:~/.config/tmux/tmux.conf && \
 ```bash
 bash scripts/deploy.sh --hooks
 ```
-Hooks send through bark-hub with `BARK_HUB_URL` + `BARK_HUB_TOKEN_CLAUDE` from env or `~/.zsh_secrets`. If those are missing, direct `BARK_SERVER` / `BARK_DEVICE_KEY` remain the fallback until the bark-hub lock-down. Scheduled-task (routine) sessions skip the Finished push; questions, plans and approvals still push.
+Hooks send through bark-hub with `BARK_HUB_URL` + `BARK_HUB_TOKEN_CLAUDE` from env or `~/.zsh_secrets`. The hub is the only push path; if those are missing, no push is sent. Scheduled-task (routine) sessions skip the Finished push; questions, plans and approvals still push.
 
 New machine: copy the repo, add `BARK_HUB_URL` and that machine's `BARK_HUB_TOKEN_CLAUDE` (minted in bark-hub) to `~/.zsh_secrets`, then run `bash scripts/install-claude-hooks.sh` and `bash hooks/notify.sh --test`.
 

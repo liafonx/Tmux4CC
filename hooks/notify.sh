@@ -5,36 +5,53 @@ trap 'exit 0' ERR
 
 # ~/.claude/hooks/notify.sh — Claude Code hook → Bark iOS push (https://github.com/Finb/bark)
 #
+# Sends only through bark-hub (https://bark.liafonx.net/v1/notify, bark-hub repo).
+# Missing or unusable hub configuration means no push.
+#
 # Pushes only for the MAIN agent (hook input carries .agent_id only inside subagents):
 #   PreToolUse AskUserQuestion → "Claude asks"
 #   PreToolUse ExitPlanMode    → "Plan ready to approve"
+#   Notification permission_prompt → "Needs approval": Claude Code sends it only after
+#                                a permission prompt has waited ~6 s unanswered, so
+#                                approving at the keyboard doesn't buzz the phone.
+#                                Subagent prompts count too (they block the work).
 #   Stop                       → "Finished", only when no more work is coming:
-#                                no background tasks and no session crons (/loop wakeups)
-# Everything else (SubagentStop, Notification, ...) is ignored.
+#                                no background tasks and no session crons (/loop wakeups),
+#                                and never for a scheduled-task (routine) session: its first
+#                                user message is the app's <scheduled-task name=...> wrapper
+#                                (after any leading <system-reminder> blocks)
+# Everything else (SubagentStop, other Notification types, ...) is ignored.
 #
 # Push layout — a nudge to go back to the computer, not a reading view:
 #   title "Claude Code · <host>", subtitle "<session name>", body "<emoji> <State>" only.
 #
-# Config — environment, else the BARK_* lines of ~/.zsh_secrets
+# Config — environment, else hub and notification-option lines of ~/.zsh_secrets
 # (Desktop app sessions don't inherit the shell environment):
-#   BARK_SERVER       e.g. https://bark.liafonx.net        (required)
-#   BARK_DEVICE_KEY   device key(s), comma-separated       (required)
+#   BARK_HUB_URL          e.g. https://bark.liafonx.net    (both of these required;
+#   BARK_HUB_TOKEN_CLAUDE token for source "claude"         BARK_HUB_TOKEN is accepted if the
+#                                                           per-source one is unset)
 #   BARK_HOST_LABEL   machine name shown in pushes         (default: hostname -s)
-#   BARK_ICON         icon URL                             (optional)
 #   BARK_SOUND_ASK    sound for questions/plans            (default: minuet)
 #   BARK_SOUND_DONE   sound for "Finished"                 (default: Bark default)
 #   BARK_DEBUG=1      append raw hook input to $TMPDIR/cc-bark-debug.jsonl
-#   BARK_DRY_RUN=1    print the push payload instead of sending it
+#   BARK_DRY_RUN=1    print the push payload instead of sending it (never the token)
 #
 # Usage: notify.sh < hook-input.json
 #        notify.sh --test            # send a test push
 
-if [[ -z "${BARK_SERVER:-}" || -z "${BARK_DEVICE_KEY:-}" ]] && [[ -f "$HOME/.zsh_secrets" ]]; then
-  # Only the BARK_* lines — the rest of the file may be zsh-specific.
+if [[ -z "${BARK_HUB_URL:-}" || -z "${BARK_HUB_TOKEN_CLAUDE:-${BARK_HUB_TOKEN:-}}" ]] \
+   && [[ -f "$HOME/.zsh_secrets" ]]; then
+  # Only hub credentials and notification options; the rest may be zsh-specific.
   # eval, not `source <(...)`: macOS /bin/bash 3.2 sources process substitutions as empty.
-  eval "$(grep -E '^[[:space:]]*(export[[:space:]]+)?BARK_[A-Z_]+=' "$HOME/.zsh_secrets" || true)"
+  eval "$(grep -E '^[[:space:]]*(export[[:space:]]+)?BARK_(HUB_[A-Z_]+|HOST_LABEL|SOUND_[A-Z_]+|DEBUG|DRY_RUN)=' "$HOME/.zsh_secrets" || true)"
 fi
-[[ -n "${BARK_SERVER:-}" && -n "${BARK_DEVICE_KEY:-}" ]] || exit 0
+
+# Both the URL and a token curl's config can carry must resolve.
+hub_token="${BARK_HUB_TOKEN_CLAUDE:-${BARK_HUB_TOKEN:-}}"
+if [[ -z "${BARK_HUB_URL:-}" || -z "$hub_token" || "$hub_token" == *[!A-Za-z0-9._~+/=-]* ]]; then
+  [[ "${1:-}" == "--test" ]] && printf '%s\n' 'bark-hub is not configured: set BARK_HUB_URL and BARK_HUB_TOKEN_CLAUDE (or BARK_HUB_TOKEN) with a usable token'
+  exit 0
+fi
 command -v jq &>/dev/null || exit 0
 
 mode="hook"
@@ -80,6 +97,12 @@ note=$(jq -c \
   elif .hook_event_name == "PreToolUse" and .tool_name == "ExitPlanMode" then
     {body: "📋 Plan ready", level: "timeSensitive", sound: $sound_ask}
 
+  # "Claude needs your permission to use <tool>". Questions and plans also go through
+  # the permission path; they already pushed ❓ / 📋 above, so skip them here.
+  elif .hook_event_name == "Notification" and .notification_type == "permission_prompt" then
+    if (.message // "") | test("Ask ?User ?Question|Exit ?Plan ?Mode"; "i") then empty
+    else {body: "🔐 Needs approval", level: "timeSensitive", sound: $sound_ask} end
+
   elif .hook_event_name == "Stop" then
     if .stop_hook_active == true
        or ((.background_tasks // []) | length) > 0
@@ -92,11 +115,30 @@ note=$(jq -c \
 [[ -n "$note" ]] || exit 0
 
 session=$(jq -r '.session_id // "session"' <<<"$input")
+transcript=$(jq -r '.transcript_path // empty' <<<"$input")
+
+# Scheduled-task (routine) sessions send no "Finished" push; their questions, plans and
+# approvals still do. Only the FIRST user record of the transcript counts (within its first 50
+# lines), so a later quote of the marker does not match: its text, after any leading
+# <system-reminder> blocks (the app adds one in scratch workspaces), must start with the app's
+# own <scheduled-task name= wrapper. A missing/unreadable transcript means "not scheduled".
+if [[ "$(jq -r '.hook_event_name // empty' <<<"$input")" == "Stop" \
+      && -n "$transcript" && -r "$transcript" ]]; then
+  scheduled=$(head -n 50 -- "$transcript" 2>/dev/null | jq -Rrn '
+    first(inputs | fromjson? | select(type == "object" and .type == "user"))
+    | (.message.content // "")
+    | (if type == "array" then map(select(type == "object" and .type == "text") | .text // "") | join("")
+       elif type == "string" then . else "" end)
+    | sub("\\A\\s*<system-reminder>[\\s\\S]*?</system-reminder>\\s*"; "")
+    | sub("\\A\\s*<system-reminder>[\\s\\S]*?</system-reminder>\\s*"; "")
+    | sub("\\A\\s*<system-reminder>[\\s\\S]*?</system-reminder>\\s*"; "")
+    | test("\\A\\s*<scheduled-task name=")' 2>/dev/null || true)
+  [[ "$scheduled" == "true" ]] && exit 0
+fi
 
 # Session name = the title Claude Code / the Desktop app shows (custom-title in the
 # transcript, same as /rename), else the agent name, else the project.
 session_name=""
-transcript=$(jq -r '.transcript_path // empty' <<<"$input")
 if [[ -n "$transcript" && -f "$transcript" ]]; then
   for type in custom-title agent-name; do
     session_name=$(grep -F "\"type\":\"$type\"" "$transcript" | tail -n 1 \
@@ -106,22 +148,19 @@ if [[ -n "$transcript" && -f "$transcript" ]]; then
 fi
 [[ -n "$session_name" ]] || session_name="$project"
 
+# bark-hub: it adds the icon and the device keys and prefixes the thread with the source.
+# An empty sound is left out (the Bark default).
 payload=$(jq -c -n \
   --argjson n "$note" \
   --arg project "$project" \
   --arg host "$host" \
   --arg session_name "$session_name" \
-  --arg keys "$BARK_DEVICE_KEY" \
-  --arg id "cc-${session:0:12}" \
-  --arg icon "${BARK_ICON:-}" '
+  --arg thread "cc-${session:0:12}" '
   def clip($n): if length > $n then .[0:$n] + "…" else . end;
-  ($keys | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))) as $k
-  | {title: "Claude Code · \($host)", subtitle: ($session_name | clip(60)),
-     body: $n.body,
-     level: $n.level, group: $project, id: $id, isArchive: "1"}
+  {title: "Claude Code · \($host)", subtitle: ($session_name | clip(60)),
+   body: $n.body,
+   level: $n.level, group: $project, thread: $thread, is_archive: true}
   + (if $n.sound != "" then {sound: $n.sound} else {} end)
-  + (if $icon != "" then {icon: $icon} else {} end)
-  + (if ($k | length) == 1 then {device_key: $k[0]} else {device_keys: $k} end)
 ')
 
 if [[ "${BARK_DRY_RUN:-}" == "1" ]]; then
@@ -129,8 +168,13 @@ if [[ "${BARK_DRY_RUN:-}" == "1" ]]; then
   exit 0
 fi
 
-resp=$(curl -sS --max-time 10 --retry 2 \
+# The token goes to curl on stdin (-K -), never on the command line. --retry is safe: the
+# payload always carries a thread, so a repeated push replaces itself.
+extra=()
+[[ "$mode" == "test" ]] && extra=(-w '\nhttp %{http_code}')
+resp=$(printf 'header = "Authorization: Bearer %s"\n' "$hub_token" | curl -sS -K - \
+  --max-time 5 --retry 2 ${extra[@]+"${extra[@]}"} \
   -H 'Content-Type: application/json; charset=utf-8' \
-  -d "$payload" "${BARK_SERVER%/}/push" 2>&1 || true)
+  --data-binary "$payload" "${BARK_HUB_URL%/}/v1/notify" 2>&1 || true)
 [[ "$mode" == "test" ]] && printf '%s\n' "$resp"
 exit 0
