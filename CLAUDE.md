@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+`AGENTS.md` is a symlink to this file. Treat `CLAUDE.md` and `AGENTS.md` as the same instructions document.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project
@@ -12,7 +14,7 @@ Shell-only (bash) installer suite for running Claude Code inside tmux across thr
 |---------|-----|------|------|--------|
 | MacBook | macOS | arm64 | `liafo` | local |
 | Mac Mini | macOS | x86_64 | `liafonx` | `liafonx@Liafonxs-Mac-mini.local` |
-| Linux VPS | Ubuntu | amd64 | `liafonx` | `liafonx@88.151.34.29` |
+| Linux VPS | Debian 12 (bookworm) | amd64 | `liafonx` | `liafonx@88.151.34.29` |
 
 Scripts run locally on each machine — no remote sudo.
 
@@ -39,7 +41,6 @@ zsh/shared/     — shared zsh files sourced on all machines (zshenv, tmux4cc in
 zsh/overlays/   — per-machine zsh additions: macbook.zsh, macmini.zsh, linux-vps.zsh
 hooks/          — Claude Code hooks: notify.sh (Bark push) + claude-hooks.json (settings.json fragment)
 scripts/        — deploy.sh, install-claude-hooks.sh, tmux-cleanup.sh, archived installers
-server/bark/    — self-hosted bark-server on the VPS: compose.yml + Caddy site
 ```
 
 ## Setup status
@@ -54,24 +55,25 @@ server/bark/    — self-hosted bark-server on the VPS: compose.yml + Caddy site
 
 ## hooks/notify.sh (Bark push)
 
-Claude Code hook → [Bark](https://github.com/Finb/bark) iOS push via the self-hosted server `https://bark.liafonx.net`. Works in the CLI and the Desktop app's Code tab (both read `~/.claude/settings.json` hooks).
+Claude Code hook → [Bark](https://github.com/Finb/bark) iOS push through bark-hub. Works in the CLI and the Desktop app's Code tab (both read `~/.claude/settings.json` hooks).
 
 **What pushes** — main agent only; any hook input with `.agent_id` (subagent) is dropped:
 - `PreToolUse` `AskUserQuestion` → ❓ Question
 - `PreToolUse` `ExitPlanMode` → 📋 Plan ready
-- `Stop` → ✅ Finished, **only if no more work is coming**: `background_tasks` and `session_crons` (incl. `/loop` wakeups) in the Stop input are both empty, and `stop_hook_active` isn't true.
+- `Notification` `permission_prompt` → 🔐 Needs approval. Claude Code fires it only after a permission prompt has waited ~6 s unanswered (CLI and Desktop), so approving at the keyboard doesn't buzz the phone. Messages naming `AskUserQuestion`/`ExitPlanMode` are skipped (already pushed). Subagent prompts count too — they block the work.
+- `Stop` → ✅ Finished, **only if no more work is coming**: `background_tasks` and `session_crons` (incl. `/loop` wakeups) in the Stop input are both empty, and `stop_hook_active` isn't true. Scheduled-task (routine) sessions skip Finished; their questions, plans and approvals still push.
 
-**Layout** — title `Claude Code · <host>`, subtitle = session name (transcript `custom-title`, else project), body = the status only (`✅ Finished`, `❓ Question`, `📋 Plan ready`). A push is a nudge to go back to the computer, not a reading view — don't add message text (it gets cut off in the iOS preview, and Bark doesn't render markdown).
+**Layout** — title `Claude Code · <host>`, subtitle = session name (transcript `custom-title`, else `agent-name`, else project), body = the status only (`✅ Finished`, `❓ Question`, `📋 Plan ready`, `🔐 Needs approval`). A push is a nudge to go back to the computer, not a reading view — don't add message text (it gets cut off in the iOS preview, and Bark doesn't render markdown).
 
-Nothing else is registered (no `SubagentStop`/`Notification`/`PermissionRequest`). Hooks run with `async: true`. One push `id` per session, so a session's newest push replaces its previous one.
+Nothing else is registered (no `SubagentStop`, other `Notification` types, or `PermissionRequest` — it fires instantly on every prompt, too noisy). Hooks run with `async: true`. One push `thread` (hub) or `id` (fallback) per session, so a session's newest push replaces its previous one.
 
 **Install** — `scripts/install-claude-hooks.sh` (local, idempotent): symlinks `~/.claude/hooks/notify.sh` → `<repo>/hooks/notify.sh` and merges `hooks/claude-hooks.json` into `~/.claude/settings.json` (replaces entries whose command contains `/.claude/hooks/notify.sh`, keeps everything else; `--uninstall`, `--dry-run`). `deploy.sh --hooks` runs it locally and on both remotes.
 
-**Config** — `BARK_SERVER`, `BARK_DEVICE_KEY` (comma-separated for several devices), optional `BARK_HOST_LABEL` in `~/.zsh_secrets`. The script greps only `BARK_*` lines from that file, because Desktop-app sessions don't inherit the shell env. Debug: `BARK_DRY_RUN=1` prints the payload, `BARK_DEBUG=1` logs raw hook input to `$TMPDIR/cc-bark-debug.jsonl`. Smoke test: `bash ~/.claude/hooks/notify.sh --test`.
+**Config** — `BARK_HUB_URL` + `BARK_HUB_TOKEN_CLAUDE` from env or `~/.zsh_secrets` send through bark-hub (`BARK_HUB_TOKEN` is also accepted when the source token is unset). Tokens are minted in bark-hub, one per source and machine. If hub credentials are missing, direct `BARK_SERVER` + `BARK_DEVICE_KEY` (comma-separated for several devices) remain the fallback until the bark-hub lock-down. Optional `BARK_HOST_LABEL` names the machine. The script reads only `BARK_*` lines from the secrets file for Desktop-app sessions. Debug: `BARK_DRY_RUN=1` prints the payload, `BARK_DEBUG=1` logs raw hook input to `$TMPDIR/cc-bark-debug.jsonl`. Smoke test: `bash ~/.claude/hooks/notify.sh --test`.
 
-**New machine** — copy the repo, add the `BARK_*` lines to `~/.zsh_secrets`, run `bash scripts/install-claude-hooks.sh`, then `notify.sh --test`.
+**New machine** — copy the repo, add `BARK_HUB_URL` and that machine's `BARK_HUB_TOKEN_CLAUDE` to `~/.zsh_secrets`, run `bash scripts/install-claude-hooks.sh`, then `notify.sh --test`.
 
-**Server** — `server/bark/compose.yml` runs at `~/bark-server` on the VPS (`docker compose up -d`, port `127.0.0.1:8087`); `server/bark/bark.liafonx.net.caddy` goes in `/etc/caddy/sites-available/` (wildcard cert, needs sudo). The old ntfy setup is retired (Caddy site `.disabled`).
+Bark server, icons and the push gateway live in bark-hub (`~/Development/GitWorkspace/bark-hub`); see its CLAUDE.md.
 
 ## tmux.conf
 
@@ -89,11 +91,12 @@ tmux source ~/.config/tmux/tmux.conf
 
 **Key design decisions:**
 - Meta/Option+key bindings (no prefix needed) for pane/window navigation
-- Mouse drag auto-copies to system clipboard (pbcopy on macOS, xclip on Linux, via if-shell)
+- Mouse drag (and double/triple-click) auto-copies to clipboard; `y`/`Enter` in copy-mode are manual fallbacks. All use bare `copy-pipe-and-cancel`, so they inherit the `copy-command` option (below).
 - Alternate-screen scroll sends 5 Up/Down keys (for Claude Code, vim, etc.)
 - Status bar uses Catppuccin Mocha palette (`#1e1e2e` bg, `#cdd6f4` fg)
-- `set-clipboard external` + OSC 52 for clipboard over SSH
-- `if-shell` clipboard dispatch evaluated at source time — re-source after changing clipboard tools
+- Clipboard strategy: `set -g copy-command "pbcopy"` is set **only on the MacBook** (`id -un = liafo`) via `if-shell`, so copies land on the macOS clipboard even in Terminal.app (no OSC 52). Remotes (`liafonx`) leave `copy-command` empty and rely on OSC 52.
+- `set-clipboard external` + OSC 52 stays on everywhere — it's the sole clipboard path on the Mac Mini / VPS (Termius relays OSC 52 → your device clipboard) and a harmless bonus on the MacBook.
+- The `id -un` discriminator (MacBook `liafo` vs remotes `liafonx`) matters: `pbcopy` on the Mac Mini would write the *Mac Mini's* clipboard, not the device you're viewing from.
 
 **TPM plugins (install via `prefix + I`):**
 | Plugin | Installed | Purpose | Key binding |
@@ -131,7 +134,6 @@ scp tmux/tmux.conf liafonx@88.151.34.29:~/.config/tmux/tmux.conf && \
 |-----------|---------------|
 | `hooks/` | `~/.config/tmux4cc/hooks/` → then run `scripts/install-claude-hooks.sh` there (links `~/.claude/hooks/notify.sh`, merges settings.json) |
 | `scripts/tmux-cleanup.sh` | `~/.tmux/cleanup.sh` |
-| `server/bark/*` | VPS only: `~/bark-server/` |
 
 ## Gotchas
 
