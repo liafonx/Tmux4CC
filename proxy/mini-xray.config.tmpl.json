@@ -1,0 +1,135 @@
+{
+    "log": {
+        "access": "none",
+        "error": "/usr/local/etc/xray/logs/error.log",
+        "loglevel": "warning",
+        "dnsLog": false,
+        "maskAddress": ""
+    },
+    "inbounds": [
+        {
+            "listen": "127.0.0.1",
+            "port": 10801,
+            "protocol": "socks",
+            "settings": {
+                "udp": true,
+                "userLevel": 1
+            },
+            "tag": "qb-socks"
+        }
+    ],
+    "outbounds": [
+        {
+            "protocol": "blackhole",
+            "settings": {
+                "response": {
+                    "type": "http"
+                }
+            },
+            "tag": "block"
+        },
+        {
+            "protocol": "vless",
+            "settings": {
+                "address": "liatech.eu.org",
+                "port": 54451,
+                "id": "<UUID_R_REVERSE_ONLY>",
+                "encryption": "<VLESS_ENCRYPTION>",
+                "flow": "xtls-rprx-vision",
+                "reverse": {
+                    "tag": "r-client"
+                }
+            },
+            "tag": "r-client"
+        },
+        {
+            "protocol": "vless",
+            "settings": {
+                "address": "liatech.eu.org",
+                "port": 54451,
+                "id": "<UUID_F_FORWARD_ONLY>",
+                "encryption": "<VLESS_ENCRYPTION>",
+                "flow": "xtls-rprx-vision"
+            },
+            "tag": "to-vps-fwd"
+        },
+        {
+            "protocol": "direct",
+            "settings": {
+                "redirect": "127.0.0.1:54904",
+                "finalRules": [
+                    {
+                        "action": "allow",
+                        "network": "tcp,udp",
+                        "ip": [
+                            "127.0.0.1/32"
+                        ],
+                        "port": "54904"
+                    }
+                ]
+            },
+            "tag": "qb-local",
+            "streamSettings": {
+                "sockopt": {
+                    "domainStrategy": "UseIPv4"
+                }
+            }
+        },
+        {
+            "protocol": "direct",
+            "settings": {
+                "finalRules": [
+                    {
+                        "action": "block",
+                        "ip": [
+                            "geoip:private"
+                        ]
+                    },
+                    {
+                        "action": "allow"
+                    }
+                ]
+            },
+            "tag": "direct-out",
+            "streamSettings": {
+                "sockopt": {
+                    "domainStrategy": "UseIPv4"
+                }
+            }
+        }
+    ],
+    "routing": {
+        "domainStrategy": "IPOnDemand",
+        "rules": [
+            {
+                "inboundTag": [
+                    "r-client"
+                ],
+                "domain": [
+                    "full:qb.invalid"
+                ],
+                "port": "54904",
+                "outboundTag": "qb-local"
+            },
+            {
+                "inboundTag": [
+                    "r-client"
+                ],
+                "outboundTag": "direct-out"
+            },
+            {
+                "inboundTag": [
+                    "qb-socks"
+                ],
+                "outboundTag": "to-vps-fwd"
+            }
+        ]
+    },
+    "policy": {
+        "levels": {
+            "1": {
+                "connIdle": 86400
+            }
+        }
+    }
+}

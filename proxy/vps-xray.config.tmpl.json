@@ -1,0 +1,180 @@
+{
+    "log": {
+        "access": "none",
+        "error": "/var/log/xray/error.log",
+        "loglevel": "warning",
+        "dnsLog": false,
+        "maskAddress": ""
+    },
+    "inbounds": [
+        {
+            "listen": "88.151.34.29",
+            "port": 54904,
+            "protocol": "tunnel",
+            "tag": "r-server",
+            "settings": {
+                "address": "qb.invalid",
+                "port": 54904,
+                "network": "tcp,udp"
+            }
+        },
+        {
+            "listen": "88.151.34.29",
+            "port": 54451,
+            "protocol": "vless",
+            "settings": {
+                "decryption": "<VLESS_DECRYPTION_TUNNEL>",
+                "clients": [
+                    {
+                        "id": "<UUID_R_REVERSE_ONLY>",
+                        "flow": "xtls-rprx-vision",
+                        "reverse": {
+                            "tag": "r-client"
+                        },
+                        "email": "uuid-r@proxy"
+                    },
+                    {
+                        "id": "<UUID_F_FORWARD_ONLY>",
+                        "flow": "xtls-rprx-vision",
+                        "email": "uuid-f@proxy"
+                    }
+                ]
+            },
+            "tag": "vless-in"
+        },
+        {
+            "tag": "claude-vless",
+            "listen": "0.0.0.0",
+            "port": 8443,
+            "protocol": "vless",
+            "settings": {
+                "decryption": "<VLESS_DECRYPTION_CLAUDE>",
+                "clients": [
+                    {
+                        "id": "<UUID_OWNER>",
+                        "flow": "xtls-rprx-vision",
+                        "email": "owner@claude"
+                    },
+                    {
+                        "id": "<UUID_BAI>",
+                        "flow": "xtls-rprx-vision",
+                        "email": "bai@claude"
+                    }
+                ]
+            },
+            "streamSettings": {
+                "network": "raw",
+                "security": "none"
+            }
+        },
+        {
+            "tag": "mini-exit",
+            "listen": "0.0.0.0",
+            "port": 10810,
+            "protocol": "socks",
+            "settings": {
+                "auth": "password",
+                "accounts": [
+                    {
+                        "user": "vps",
+                        "pass": "<MINI_EXIT_PASS>"
+                    }
+                ],
+                "udp": false
+            }
+        }
+    ],
+    "outbounds": [
+        {
+            "protocol": "direct",
+            "tag": "direct-out",
+            "streamSettings": {
+                "sockopt": {
+                    "domainStrategy": "UseIPv4"
+                }
+            }
+        },
+        {
+            "protocol": "blackhole",
+            "settings": {
+                "response": {
+                    "type": "http"
+                }
+            },
+            "tag": "block"
+        }
+    ],
+    "routing": {
+        "domainStrategy": "IPOnDemand",
+        "rules": [
+            {
+                "inboundTag": [
+                    "r-server"
+                ],
+                "outboundTag": "r-client"
+            },
+            {
+                "inboundTag": [
+                    "claude-vless"
+                ],
+                "network": "tcp",
+                "domain": [
+                    "domain:anthropic.com",
+                    "domain:platform.claude.com",
+                    "domain:claude.ai",
+                    "domain:claude.com",
+                    "domain:clau.de",
+                    "domain:claudemcpclient.com",
+                    "domain:claudemcpcontent.com",
+                    "domain:claudeusercontent.com",
+                    "domain:sentry.io",
+                    "domain:statsigapi.net",
+                    "domain:intercom.io",
+                    "domain:intercomcdn.com",
+                    "full:servd-anthropic-website.b-cdn.net",
+                    "full:anthropic.com.cdn.cloudflare.net",
+                    "full:anthropic.auth0.com",
+                    "full:anthropic-com.ghost.io",
+                    "full:browser-intake-us5-datadoghq.com",
+                    "full:cdn.usefathom.com",
+                    "domain:datadoghq.com",
+                    "domain:sift.com",
+                    "domain:siftscience.com"
+                ],
+                "outboundTag": "r-client"
+            },
+            {
+                "inboundTag": [
+                    "claude-vless"
+                ],
+                "network": "tcp",
+                "ip": [
+                    "160.79.104.0/21"
+                ],
+                "outboundTag": "r-client"
+            },
+            {
+                "inboundTag": [
+                    "claude-vless"
+                ],
+                "outboundTag": "block"
+            },
+            {
+                "inboundTag": [
+                    "mini-exit"
+                ],
+                "source": [
+                    "172.16.0.0/12",
+                    "127.0.0.0/8"
+                ],
+                "outboundTag": "r-client"
+            },
+            {
+                "inboundTag": [
+                    "mini-exit"
+                ],
+                "outboundTag": "block"
+            }
+        ]
+    }
+}

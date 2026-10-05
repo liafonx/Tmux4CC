@@ -149,3 +149,5 @@ scp tmux/tmux.conf liafonx@88.151.34.29:~/.config/tmux/tmux.conf && \
 - Heredocs use single-quoted `'EOF'` to prevent variable expansion (except when expansion is intentional)
 - Scripts must be idempotent — safe to re-run
 - Backup existing files to `<file>.pre-tmux4cc.bak` before overwriting
+
+Codex review: shared `codex-review` skill; this repo's profile is `.claude/codex-review.md`.
